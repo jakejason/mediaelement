@@ -14,7 +14,6 @@ import {addClass, removeClass} from '../utils/dom';
  * between paused and playing.
  */
 
-
 // Feature configuration
 Object.assign(config, {
 	/**
@@ -39,7 +38,6 @@ Object.assign(MediaElementPlayer.prototype, {
 	 * @public
 	 */
 	buildplaypause (player, controls, layers, media)  {
-
 		const
 			t = this,
 			op = t.options,
@@ -86,7 +84,7 @@ Object.assign(MediaElementPlayer.prototype, {
 
 		media.addEventListener('loadedmetadata', () => {
 			// `loadedmetadata` in Flash is executed simultaneously with `play`, so avoid it
-			if (media.rendererName.match(/flash/) === null) {
+			if (media.rendererName.indexOf('flash') === -1) {
 				togglePlayPause('pse');
 			}
 		});
@@ -100,7 +98,6 @@ Object.assign(MediaElementPlayer.prototype, {
 			togglePlayPause('pse');
 		});
 		media.addEventListener('ended', () => {
-
 			if (!player.options.loop) {
 				removeClass(play, `${t.options.classPrefix}pause`);
 				removeClass(play, `${t.options.classPrefix}play`);
@@ -108,9 +105,6 @@ Object.assign(MediaElementPlayer.prototype, {
 				playBtn.setAttribute('title', playTitle);
 				playBtn.setAttribute('aria-label', playTitle);
 			}
-
 		});
 	}
 });
-
-

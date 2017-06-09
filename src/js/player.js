@@ -13,7 +13,6 @@ import {
 	IS_ANDROID,
 	IS_IOS,
 	IS_STOCK_ANDROID,
-	HAS_MS_NATIVE_FULLSCREEN,
 	HAS_TRUE_NATIVE_FULLSCREEN
 } from './utils/constants';
 import {splitEvents, isNodeAfter, createEvent, isString} from './utils/general';
@@ -46,17 +45,15 @@ export const config = {
 	// Default if the user doesn't specify
 	defaultAudioHeight: 40,
 	// Default amount to move back when back key is pressed
-	defaultSeekBackwardInterval: (media) => media.duration * 0.05,
+	defaultSeekBackwardInterval: (media) => media.getDuration() * 0.05,
 	// Default amount to move forward when forward key is pressed
-	defaultSeekForwardInterval: (media) => media.duration * 0.05,
+	defaultSeekForwardInterval: (media) => media.getDuration() * 0.05,
 	// Set dimensions via JS instead of CSS
 	setDimensions: true,
 	// Width of audio player
 	audioWidth: -1,
 	// Height of audio player
 	audioHeight: -1,
-	// Initial volume when the player starts (overridden by user cookie)
-	startVolume: 0.8,
 	// Useful for <audio> player loops
 	loop: false,
 	// Rewind to beginning when media ends
@@ -297,7 +294,6 @@ class MediaElementPlayer {
 			return t.media.player;
 		}
 
-
 		// try to get options from data-mejsoptions
 		if (o === undefined) {
 			const options = t.node.getAttribute('data-mejsoptions');
@@ -306,6 +302,14 @@ class MediaElementPlayer {
 
 		// extend default options
 		t.options = Object.assign({}, config, o);
+
+		// Check `loop` attribute to modify options
+		if (t.options.loop && !t.media.getAttribute('loop')) {
+			t.media.loop = true;
+			t.node.loop = true;
+		} else if (t.media.loop) {
+			t.options.loop = true;
+		}
 
 		if (!t.options.timeFormat) {
 			// Generate the time format according to options
@@ -328,7 +332,6 @@ class MediaElementPlayer {
 
 		// start up
 		const
-
 			meOptions = Object.assign({}, t.options, {
 				success: (media, domNode) => {
 					t._meReady(media, domNode);
@@ -386,21 +389,17 @@ class MediaElementPlayer {
 			t.container.addEventListener('focus', (e) => {
 				if (!t.controlsAreVisible && !t.hasFocus && t.controlsEnabled) {
 					t.showControls(true);
-					// In versions older than IE11, the focus causes the playbar to be displayed
-					// if user clicks on the Play/Pause button in the control bar once it attempts
-					// to hide it
-					if (!HAS_MS_NATIVE_FULLSCREEN) {
-						// If e.relatedTarget appears before container, send focus to play button,
-						// else send focus to last control button.
-						const
-							btnSelector = isNodeAfter(e.relatedTarget, t.container) ?
-								`.${t.options.classPrefix}controls .${t.options.classPrefix}button:last-child > button` :
-								`.${t.options.classPrefix}playpause-button > button`,
-							button = t.container.querySelector(btnSelector)
-						;
 
-						button.focus();
-					}
+					// If e.relatedTarget appears before container, send focus to play button,
+					// else send focus to last control button.
+					const
+						btnSelector = isNodeAfter(e.relatedTarget, t.container) ?
+							`.${t.options.classPrefix}controls .${t.options.classPrefix}button:last-child > button` :
+							`.${t.options.classPrefix}playpause-button > button`,
+						button = t.container.querySelector(btnSelector)
+					;
+
+					button.focus();
 				}
 			});
 			t.node.parentNode.insertBefore(t.container, t.node);
@@ -445,7 +444,7 @@ class MediaElementPlayer {
 
 				const
 					cloneNode = t.node.cloneNode(),
-					children = t.node.childNodes,
+					children = t.node.children,
 					mediaFiles = [],
 					tracks = []
 				;
@@ -453,23 +452,22 @@ class MediaElementPlayer {
 				for (let i = 0, total = children.length; i < total; i++) {
 					const childNode = children[i];
 
-					if (childNode && childNode.nodeType !== Node.TEXT_NODE) {
-						switch (childNode.tagName.toLowerCase()) {
-							case 'source':
-								const src = childNode.getAttribute('src');
-								mediaFiles.push({
-									type: formatType(src, childNode.getAttribute('type')),
-									src: src
-								});
-								break;
-							case 'track':
-								childNode.mode = 'hidden';
-								tracks.push(childNode);
-								break;
-							default:
-								cloneNode.appendChild(childNode);
-								break;
-						}
+					switch (childNode.tagName.toLowerCase()) {
+						case 'source':
+							const elements = {};
+							Array.prototype.slice.call(childNode.attributes).forEach((item) => {
+								elements[item.name] = item.value;
+							});
+							elements.type = formatType(elements.src, elements.type);
+							mediaFiles.push(elements);
+							break;
+						case 'track':
+							childNode.mode = 'hidden';
+							tracks.push(childNode);
+							break;
+						default:
+							cloneNode.appendChild(childNode);
+							break;
 					}
 				}
 
@@ -507,7 +505,6 @@ class MediaElementPlayer {
 				tagType = (t.isVideo ? 'video' : 'audio'),
 				capsTagName = tagType.substring(0, 1).toUpperCase() + tagType.substring(1)
 			;
-
 
 			if (t.options[tagType + 'Width'] > 0 || t.options[tagType + 'Width'].toString().indexOf('%') > -1) {
 				t.width = t.options[tagType + 'Width'];
@@ -560,13 +557,13 @@ class MediaElementPlayer {
 
 		doAnimation = doAnimation === undefined || doAnimation;
 
-		if (t.controlsAreVisible) {
+		if (t.controlsAreVisible || !t.isVideo) {
 			return;
 		}
 
 		if (doAnimation) {
-			dom.removeClass(t.controls, `${t.options.classPrefix}offscreen`);
 			dom.fadeIn(t.controls, 200, () => {
+				dom.removeClass(t.controls, `${t.options.classPrefix}offscreen`);
 				const event = createEvent('controlsshown', t.container);
 				t.container.dispatchEvent(event);
 			});
@@ -581,6 +578,7 @@ class MediaElementPlayer {
 		} else {
 			dom.removeClass(t.controls, `${t.options.classPrefix}offscreen`);
 			t.controls.style.display = '';
+			t.controls.style.opacity = 1;
 
 			// any additional controls people might add and want to hide
 			const controls = t.container.querySelectorAll(`.${t.options.classPrefix}control`);
@@ -595,7 +593,6 @@ class MediaElementPlayer {
 
 		t.controlsAreVisible = true;
 		t.setControlsSize();
-
 	}
 
 	hideControls (doAnimation, forceHide) {
@@ -633,6 +630,7 @@ class MediaElementPlayer {
 			// hide main controls
 			dom.addClass(t.controls, `${t.options.classPrefix}offscreen`);
 			t.controls.style.display = '';
+			t.controls.style.opacity = 0;
 
 			// hide others
 			const controls = t.container.querySelectorAll(`.${t.options.classPrefix}control`);
@@ -649,7 +647,6 @@ class MediaElementPlayer {
 	}
 
 	startControlsTimer (timeout) {
-
 		const t = this;
 
 		timeout = typeof timeout !== 'undefined' ? timeout : t.options.controlsTimeoutDefault;
@@ -663,7 +660,6 @@ class MediaElementPlayer {
 	}
 
 	killControlsTimer () {
-
 		const t = this;
 
 		if (t.controlsTimer !== null) {
@@ -677,7 +673,7 @@ class MediaElementPlayer {
 		const t = this;
 
 		t.killControlsTimer();
-		t.controlsEnabled = true;
+		t.controlsEnabled = false;
 		t.hideControls(false, true);
 	}
 
@@ -696,19 +692,18 @@ class MediaElementPlayer {
 	 * @private
 	 */
 	_meReady (media, domNode) {
-
 		const
 			t = this,
 			autoplayAttr = domNode.getAttribute('autoplay'),
 			autoplay = !(autoplayAttr === undefined || autoplayAttr === null || autoplayAttr === 'false'),
-			isNative = media.rendererName !== null && media.rendererName.match(/(native|html5)/) !== null
+			isNative = media.rendererName !== null && /(native|html5)/i.test(t.media.rendererName)
 		;
 
 		if (t.controls) {
 			t.enableControls();
 		}
 
-		if (t.container.querySelector(`.${t.options.classPrefix}overlay-play`)) {
+		if (t.container && t.container.querySelector(`.${t.options.classPrefix}overlay-play`)) {
 			t.container.querySelector(`.${t.options.classPrefix}overlay-play`).style.display = '';
 		}
 
@@ -727,12 +722,10 @@ class MediaElementPlayer {
 			// create only MediaElement instance rather than
 			// doing all the work to create a full player
 			if (!t.isVideo && !t.options.features.length) {
-
 				// force autoplay for HTML5
 				if (autoplay && isNative) {
 					t.play();
 				}
-
 
 				if (t.options.success) {
 
@@ -823,9 +816,7 @@ class MediaElementPlayer {
 							}
 						}
 					});
-
 				} else {
-
 					// show/hide controls
 					t.container.addEventListener('mouseenter', () => {
 						if (t.controlsEnabled) {
@@ -869,11 +860,12 @@ class MediaElementPlayer {
 					t.media.addEventListener('loadedmetadata', (e) => {
 						// if the <video height> was not set and the options.videoHeight was not set
 						// then resize to the real dimensions
+						const target = (e !== undefined) ? (e.detail.target || e.target) : t.media;
 						if (t.options.videoHeight <= 0 && !t.domNode.getAttribute('height') &&
-							e.target !== null && !isNaN(e.target.videoHeight)) {
-							t.setPlayerSize(e.target.videoWidth, e.target.videoHeight);
+							target !== null && !isNaN(target.videoHeight)) {
+							t.setPlayerSize(target.videoWidth, target.videoHeight);
 							t.setControlsSize();
-							t.media.setSize(e.target.videoWidth, e.target.videoHeight);
+							t.media.setSize(target.videoWidth, target.videoHeight);
 						}
 					});
 				}
@@ -896,7 +888,6 @@ class MediaElementPlayer {
 						}
 					}
 				}
-
 			});
 
 			// ended for all
@@ -917,8 +908,8 @@ class MediaElementPlayer {
 					}
 				}
 
-				if (typeof t.media.stop === 'function') {
-					t.media.stop();
+				if (typeof t.media.renderer.stop === 'function') {
+					t.media.renderer.stop();
 				} else {
 					t.media.pause();
 				}
@@ -958,8 +949,8 @@ class MediaElementPlayer {
 			// Only change the time format when necessary
 			let duration = null;
 			t.media.addEventListener('timeupdate', () => {
-				if (duration !== t.media.duration) {
-					duration = t.media.duration;
+				if (!isNaN(t.media.getDuration()) && duration !== t.media.getDuration()) {
+					duration = t.media.getDuration();
 					calculateTimeFormat(duration, t.options, t.options.framesPerSecond || 25);
 
 					// make sure to fill in and resize the controls (e.g., 00:00 => 01:13:15
@@ -969,7 +960,21 @@ class MediaElementPlayer {
 					if (t.updateCurrent) {
 						t.updateCurrent();
 					}
+
 					t.setControlsSize();
+				}
+			});
+
+			// Disable focus outline to improve look-and-feel for regular users
+			t.container.addEventListener('click', function (e) {
+				dom.addClass(e.currentTarget, `${t.options.classPrefix}container-keyboard-inactive`);
+			});
+
+			// Enable focus outline for Accessibility purposes
+			t.container.addEventListener('focusin', function (e) {
+				dom.removeClass(e.currentTarget, `${t.options.classPrefix}container-keyboard-inactive`);
+				if (t.controlsEnabled && !t.options.alwaysShowControls) {
+					t.showControls(false);
 				}
 			});
 
@@ -977,7 +982,7 @@ class MediaElementPlayer {
 				setTimeout(() => {
 					//FF is working on supporting focusout https://bugzilla.mozilla.org/show_bug.cgi?id=687787
 					if (e.relatedTarget) {
-						if (t.keyboardAction && !e.relatedTarget.closest('.mejs-container')) {
+						if (t.keyboardAction && !e.relatedTarget.closest(`.${t.options.classPrefix}container`)) {
 							t.keyboardAction = false;
 							if (t.isVideo && !t.options.alwaysShowControls) {
 								t.hideControls(true);
@@ -1005,24 +1010,6 @@ class MediaElementPlayer {
 				// always adjust controls
 				t.setControlsSize();
 			});
-
-			// Disable focus outline to improve look-and-feel for regular users
-			t.globalBind('click', (e) => {
-				if (e.target.matches(`.${t.options.classPrefix}container`)) {
-					dom.addClass(e.target, `${t.options.classPrefix}container-keyboard-inactive`);
-				} else if (e.target.closest(`.${t.options.classPrefix}container`)) {
-					dom.addClass(e.target.closest(`.${t.options.classPrefix}container`), `${t.options.classPrefix}container-keyboard-inactive`);
-				}
-			});
-
-			// Enable focus outline for Accessibility purposes
-			t.globalBind('keydown', (e) => {
-				if (e.target.matches(`.${t.options.classPrefix}container`)) {
-					dom.removeClass(e.target, `${t.options.classPrefix}container-keyboard-inactive`);
-				} else if (e.target.closest(`.${t.options.classPrefix}container`)) {
-					dom.removeClass(event.target.closest(`.${t.options.classPrefix}container`), `${t.options.classPrefix}container-keyboard-inactive`);
-				}
-			});
 		}
 
 		// force autoplay for HTML5
@@ -1031,7 +1018,6 @@ class MediaElementPlayer {
 		}
 
 		if (t.options.success) {
-
 			if (typeof t.options.success === 'string') {
 				window[t.options.success](t.media, t.domNode, t);
 			} else {
@@ -1110,7 +1096,7 @@ class MediaElementPlayer {
 		const t = this;
 
 		// detect 100% mode - use currentStyle for IE since css() doesn't return percentages
-		return (t.height.toString().includes('%') || (t.node && t.node.style.maxWidth && t.node.style.maxWidth !== 'none' &&
+		return (t.height.toString().indexOf('%') !== -1 || (t.node && t.node.style.maxWidth && t.node.style.maxWidth !== 'none' &&
 			t.node.style.maxWidth !== t.width) || (t.node && t.node.currentStyle && t.node.currentStyle.maxWidth === '100%'));
 	}
 
@@ -1124,12 +1110,9 @@ class MediaElementPlayer {
 				// traverse parents to find the closest visible one
 				while (el) {
 					try {
-						if (window.self !== window.top) {
-							if (window.frameElement !== null) {
-								return window.frameElement;
-							} else {
-								parentEl = window.frameElement.parentNode;
-							}
+						// Firefox has an issue calculating dimensions on hidden iframes
+						if (IS_FIREFOX && el.tagName.toLowerCase() === 'html' && window.self !== window.top && window.frameElement !== null) {
+							return window.frameElement;
 						} else {
 							parentEl = el.parentElement;
 						}
@@ -1203,9 +1186,9 @@ class MediaElementPlayer {
 		if (t.isVideo) {
 			// Responsive video is based on width: 100% and height: 100%
 			if (t.height === '100%') {
-				newHeight = parseInt(parentWidth * nativeHeight / nativeWidth, 10);
+				newHeight = parseFloat(parentWidth * nativeHeight / nativeWidth, 10);
 			} else {
-				newHeight = t.height >= t.width ? parseInt(parentWidth / aspectRatio, 10) : parseInt(parentWidth * aspectRatio, 10);
+				newHeight = t.height >= t.width ? parseFloat(parentWidth / aspectRatio, 10) : parseFloat(parentWidth * aspectRatio, 10);
 			}
 		} else {
 			newHeight = nativeHeight;
@@ -1237,7 +1220,7 @@ class MediaElementPlayer {
 			}
 
 			// set the layers
-			const layerChildren = t.layers.childNodes;
+			const layerChildren = t.layers.children;
 			for (let i = 0, total = layerChildren.length; i < total; i++) {
 				layerChildren[i].style.width = '100%';
 				layerChildren[i].style.height = '100%';
@@ -1248,11 +1231,15 @@ class MediaElementPlayer {
 	setFillMode () {
 		const t = this;
 
-		let parent;
+		let
+			parent,
+			isIframe = false
+		;
 
 		try {
 			if (window.self !== window.top) {
-				parent = window.frameElement.parentNode;
+				isIframe = true;
+				parent = window.frameElement;
 			} else {
 				parent = t.outerContainer;
 			}
@@ -1286,11 +1273,12 @@ class MediaElementPlayer {
 			}
 		}
 
-		if (!parseFloat(parentStyles.width)) {
+		// Avoid overriding width/height if element is inside an iframe
+		if (!isIframe && !parseFloat(parentStyles.width)) {
 			parent.style.width = `${t.media.offsetWidth}px`;
 		}
 
-		if (!parseFloat(parentStyles.height)) {
+		if (!isIframe && !parseFloat(parentStyles.height)) {
 			parent.style.height = `${t.media.offsetHeight}px`;
 		}
 
@@ -1309,7 +1297,6 @@ class MediaElementPlayer {
 			poster.style.display = '';
 		}
 
-		// calculate new width and height
 		const
 			targetElement = t.container.querySelectorAll('object, embed, iframe, video'),
 			initHeight = t.height,
@@ -1343,13 +1330,13 @@ class MediaElementPlayer {
 	setDimensions (width, height) {
 		const t = this;
 
-		width = isString(width) && width.includes('%') ? width : `${parseFloat(width)}px`;
-		height = isString(height) && height.includes('%') ? height : `${parseFloat(height)}px`;
+		width = isString(width) && width.indexOf('%') > -1 ? width : `${parseFloat(width)}px`;
+		height = isString(height) && height.indexOf('%') > -1 ? height : `${parseFloat(height)}px`;
 
 		t.container.style.width = width;
 		t.container.style.height = height;
 
-		const layers = t.layers.childNodes;
+		const layers = t.layers.children;
 		for (let i = 0, total = layers.length; i < total; i++) {
 			layers[i].style.width = width;
 			layers[i].style.height = height;
@@ -1360,32 +1347,46 @@ class MediaElementPlayer {
 		const t = this;
 
 		// skip calculation if hidden
-		if (!dom.visible(t.container) || !t.rail || !dom.visible(t.rail)) {
+		if (!dom.visible(t.container)) {
 			return;
 		}
 
-		const
-			railStyles = getComputedStyle(t.rail),
-			totalStyles = getComputedStyle(t.total),
-			railMargin = parseFloat(railStyles.marginLeft) + parseFloat(railStyles.marginRight),
-			totalMargin = parseFloat(totalStyles.marginLeft) + parseFloat(totalStyles.marginRight) || 0
-		;
+		if (t.rail && dom.visible(t.rail)) {
+			const
+				totalStyles = t.total ? getComputedStyle(t.total, null) : null,
+				totalMargin = totalStyles ? parseFloat(totalStyles.marginLeft) + parseFloat(totalStyles.marginRight) : 0,
+				railStyles = getComputedStyle(t.rail),
+				railMargin = parseFloat(railStyles.marginLeft) + parseFloat(railStyles.marginRight)
+			;
 
-		let siblingsWidth = 0;
+			let siblingsWidth = 0;
 
-		const siblings = dom.siblings(t.rail, (el) => el !== t.rail), total = siblings.length;
-		for (let i = 0; i < total; i++) {
-			siblingsWidth += siblings[i].offsetWidth;
+			const siblings = dom.siblings(t.rail, (el) => el !== t.rail), total = siblings.length;
+			for (let i = 0; i < total; i++) {
+				siblingsWidth += siblings[i].offsetWidth;
+			}
+
+			siblingsWidth += totalMargin + ((totalMargin === 0) ?  (railMargin * 2) : railMargin) + 1;
+
+			t.container.style.minWidth = `${siblingsWidth}px`;
+
+
+			// Substract the width of the feature siblings from time rail
+			const controlsWidth = parseFloat(t.controls.offsetWidth);
+			t.rail.style.width = `${(siblingsWidth > controlsWidth ? 0 : controlsWidth - siblingsWidth)}px`;
+
+			const event = createEvent('controlsresize', t.container);
+			t.container.dispatchEvent(event);
+		} else {
+			const children = t.controls.children;
+			let minWidth = 0;
+
+			for (let i = 0, total = children.length; i < total; i++) {
+				minWidth += children[i].offsetWidth;
+			}
+
+			t.container.style.minWidth = `${minWidth}px`;
 		}
-
-		siblingsWidth += totalMargin + ((totalMargin === 0) ?  (railMargin * 2) : railMargin) + 1;
-
-		// Substract the width of the feature siblings from time rail
-		const controlsWidth = parseFloat(t.controls.offsetWidth);
-		t.rail.style.width = `${(siblingsWidth > controlsWidth ? 0 : controlsWidth - siblingsWidth)}px`;
-
-		const event = createEvent('controlsresize', t.container);
-		t.container.dispatchEvent(event);
 	}
 
 	/**
@@ -1399,11 +1400,11 @@ class MediaElementPlayer {
 		const t = this;
 
 		if (t.featurePosition[key] !== undefined) {
-			const child = t.controls.childNodes[t.featurePosition[key] - 1];
+			const child = t.controls.children[t.featurePosition[key] - 1];
 			child.parentNode.insertBefore(element, child.nextSibling);
 		} else {
 			t.controls.appendChild(element);
-			const children = t.controls.childNodes;
+			const children = t.controls.children;
 			for (let i = 0, total = children.length; i < total; i++) {
 				if (element == children[i]) {
 					t.featurePosition[key] = i;
@@ -1419,10 +1420,9 @@ class MediaElementPlayer {
 	 * This allows the user to trigger events properly given that mouse/click don't get lost in the `<iframe>`.
 	 */
 	createIframeLayer () {
-
 		const t = this;
 
-		if (t.isVideo && t.media.rendererName !== null && t.media.rendererName.match(/iframe/i) !== null && !document.getElementById(`${t.media.id}-iframe-overlay`)) {
+		if (t.isVideo && t.media.rendererName !== null && t.media.rendererName.indexOf('iframe') > -1 && !document.getElementById(`${t.media.id}-iframe-overlay`)) {
 
 			const
 				layer = document.createElement('div'),
@@ -1461,7 +1461,7 @@ class MediaElementPlayer {
 		const
 			t = this,
 			posterDiv = t.container.querySelector(`.${t.options.classPrefix}poster`)
-			;
+		;
 
 		let posterImg = posterDiv.querySelector('img');
 
@@ -1513,7 +1513,6 @@ class MediaElementPlayer {
 	}
 
 	globalUnbind (events, callback) {
-
 		const
 			t = this,
 			doc = t.node ? t.node.ownerDocument : document
@@ -1541,11 +1540,10 @@ class MediaElementPlayer {
 	}
 
 	buildposter (player, controls, layers, media) {
-
 		const
 			t = this,
 			poster = document.createElement('div')
-			;
+		;
 
 		poster.className = `${t.options.classPrefix}poster ${t.options.classPrefix}layer`;
 		layers.appendChild(poster);
@@ -1642,13 +1640,23 @@ class MediaElementPlayer {
 				button.setAttribute('aria-pressed', !!pressed);
 			}
 		});
+		// Allow keyboard to execute action on play button
+		bigPlay.addEventListener('keydown', function (e) {
+			const keyPressed = e.keyCode || e.which || 0;
+			// On Enter, play media
+			if (keyPressed === 13 || (IS_FIREFOX && keyPressed === 32)) {
+				const event = createEvent('click', bigPlay);
+				bigPlay.dispatchEvent(event);
+				return false;
+			}
+		});
+
 		layers.appendChild(bigPlay);
 
-		if (t.media.rendererName !== null && ((t.media.rendererName.match(/(youtube|facebook)/) &&
+		if (t.media.rendererName !== null && ((/(youtube|facebook)/i.test(t.media.rendererName) &&
 			!(player.media.originalNode.getAttribute('poster') || player.options.poster)) || IS_STOCK_ANDROID)) {
 			bigPlay.style.display = 'none';
 		}
-
 		// show/hide big play button
 		media.addEventListener('play', () => {
 			bigPlay.style.display = 'none';
@@ -1658,7 +1666,6 @@ class MediaElementPlayer {
 			}
 			error.style.display = 'none';
 		});
-
 		media.addEventListener('playing', () => {
 			bigPlay.style.display = 'none';
 			loading.style.display = 'none';
@@ -1667,7 +1674,6 @@ class MediaElementPlayer {
 			}
 			error.style.display = 'none';
 		});
-
 		media.addEventListener('seeking', () => {
 			bigPlay.style.display = 'none';
 			loading.style.display = '';
@@ -1675,7 +1681,6 @@ class MediaElementPlayer {
 				buffer.style.display = '';
 			}
 		});
-
 		media.addEventListener('seeked', () => {
 			bigPlay.style.display = media.paused && !IS_STOCK_ANDROID ? '' : 'none';
 			loading.style.display = 'none';
@@ -1683,7 +1688,6 @@ class MediaElementPlayer {
 				buffer.style.display = '';
 			}
 		});
-
 		media.addEventListener('pause', () => {
 			loading.style.display = 'none';
 			if (!IS_STOCK_ANDROID) {
@@ -1693,14 +1697,12 @@ class MediaElementPlayer {
 				buffer.style.display = 'none';
 			}
 		});
-
 		media.addEventListener('waiting', () => {
 			loading.style.display = '';
 			if (buffer) {
 				buffer.style.display = '';
 			}
 		});
-
 
 		// show/hide loading
 		media.addEventListener('loadeddata', () => {
@@ -1835,6 +1837,10 @@ class MediaElementPlayer {
 		return this.media.currentTime;
 	}
 
+	getDuration () {
+		return this.media.duration;
+	}
+
 	setVolume (volume) {
 		this.media.setVolume(volume);
 	}
@@ -1854,12 +1860,10 @@ class MediaElementPlayer {
 		}
 
 		t.media.setSrc(src);
-
 		t.createIframeLayer();
 	}
 
 	remove () {
-
 		const
 			t = this,
 			rendererName = t.media.rendererName
@@ -1891,20 +1895,23 @@ class MediaElementPlayer {
 			nativeWidth = t.node.getAttribute('width'),
 			nativeHeight = t.node.getAttribute('height')
 		;
+
 		if (nativeWidth) {
-			if (nativeWidth.match('%') === null) {
+			if (nativeWidth.indexOf('%') === -1) {
 				nativeWidth = `${nativeWidth}px`;
 			}
 		} else {
 			nativeWidth = 'auto';
 		}
+
 		if (nativeHeight) {
-			if (nativeHeight.match('%') === null) {
+			if (nativeHeight.indexOf('%') === -1) {
 				nativeHeight = `${nativeHeight}px`;
 			}
 		} else {
 			nativeHeight = 'auto';
 		}
+
 		t.node.style.width = nativeWidth;
 		t.node.style.height = nativeHeight;
 
@@ -1922,7 +1929,7 @@ class MediaElementPlayer {
 			}
 
 			// If <iframe>, remove overlay
-			if (rendererName.match(/iframe/i) !== null) {
+			if (~rendererName.indexOf('iframe')) {
 				const layer = document.getElementById(`${t.media.id}-iframe-overlay`);
 				layer.remove();
 			}
@@ -1967,8 +1974,8 @@ class MediaElementPlayer {
 			t.container.parentNode.insertBefore(t.node, t.container);
 		}
 
-		if (typeof t.media.destroy === 'function') {
-			t.media.destroy();
+		if (typeof t.media.renderer.destroy === 'function') {
+			t.media.renderer.destroy();
 		}
 
 		// Remove the player from the mejs.players object so that pauseOtherPlayers doesn't blow up when trying to
